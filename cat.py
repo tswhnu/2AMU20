@@ -247,9 +247,9 @@ def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.0
 
     # save the model
     if save:
-        torch.save(encoder.state_dict(), 'beta model/encoder_cat.pt')
-        torch.save(decoder.state_dict(), 'beta model/decoder_cat.pt')
-
+        torch.save(encoder.state_dict(), './encoder_cat.pt')
+        torch.save(decoder.state_dict(), './decoder_cat.pt')
+        np.save('train_elbo.npy', train_elbo)
 
 def perform_test():
     # load the trained model

@@ -128,3 +128,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 /data/
+/train_elbo.npy
+/encoder_cat.pt
+/decoder_cat.pt
