@@ -106,7 +106,8 @@ class Decoder(nn.Module):
         self.sig = nn.Sigmoid()
         self.deconv2 = deconv(8, 8, 2, stride=2)
         self.pi = nn.Conv2d(8, output_channel, kernel_size=3, padding=1)
-        self.pi_act = nn.ReLU()
+        self.pi_act1 = nn.ReLU()
+        self.pi_act2 = nn.Sigmoid()
     def forward(self, z):
         z = self.dense(z)
         z = z.reshape((-1, 32, 7, 7))
@@ -114,7 +115,7 @@ class Decoder(nn.Module):
         z = self.deconv1(z)
         z = self.sig(self.conv2(z))
         z = self.deconv2(z)
-        pi = self.pi_act(self.pi(z))
+        pi = self.pi_act2(self.pi_act1(self.pi(z)))
 
         return pi
 
@@ -143,7 +144,7 @@ def train(x, encoder, decoder, optimizer):
     pi = decoder(batch_z)
 
 
-    log_p = torch.sum(torch.log(x**pi+0.0001))
+    log_p = torch.sum(torch.log(pi**x+0.0001))
 
     KL = -0.5 * torch.sum(1 + torch.log(var_z) - miu_z ** 2 - var_z)
 
@@ -168,7 +169,7 @@ def validate(x, encoder, decoder):
         pi = decoder(batch_z)
         #
 
-        log_p = torch.sum(torch.log(x**pi+0.0001))
+        log_p = torch.sum(torch.log(pi**x+0.0001))
 
         KL = -0.5 * torch.sum(1 + torch.log(var_z) - miu_z ** 2 - var_z)
 
