@@ -175,7 +175,7 @@ def validate(x, encoder, decoder):
     return neg_elbo
 
 
-def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.0001, save=False):
+def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.001, save=False):
     if encoder_dir is None or decoder_dir is None:
         print("training new model")
         pass
@@ -244,8 +244,9 @@ def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.0
 
     # save the model
     if save:
-        torch.save(encoder.state_dict(), 'beta model/encoder_beta.pt')
-        torch.save(decoder.state_dict(), 'beta model/decoder_beta.pt')
+        torch.save(encoder.state_dict(), 'encoder_cat.pt')
+        torch.save(decoder.state_dict(), 'decoder_cat.pt')
+        np.save('train_elbo.npy', train_elbo)
 
 
 def perform_test():
