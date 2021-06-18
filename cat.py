@@ -20,7 +20,7 @@ else:
 batch_size = 64
 num_train = 50000
 num_val = 10000
-latent_num = 1000
+latent_num = 50
 
 
 class onehot(object):
@@ -61,17 +61,19 @@ def conv(in_planes, out_planes):
     )
 
 
-def down_samples(in_planes, out_planes):
+def down_samples(in_planes, out_planes, kernal_size):
     return nn.Sequential(
-        nn.MaxPool2d(2),
-        conv(in_planes, out_planes)
+        nn.Conv2d(in_planes, out_planes, kernel_size=kernal_size, padding=(kernal_size-1)//2),
+        nn.ReLU(),
+        nn.MaxPool2d(2)
     )
 
 
 def up_sample(in_planes, out_planes):
     return nn.Sequential(
-        nn.ConvTranspose2d(in_planes, out_planes, kernel_size=2, stride=2),
-        conv(out_planes, out_planes)
+        nn.ConvTranspose2d(in_planes, out_planes, kernel_size=5, stride=2, padding=1),
+        nn.BatchNorm2d(out_planes),
+        nn.ReLU()
     )
 
 
@@ -79,18 +81,18 @@ class Encoder(nn.Module):
 
     def __init__(self, in_channel=3, latent_num=latent_num):
         super(Encoder, self).__init__()
-        self.conv1 = conv(in_channel, 64)
-        self.down1 = down_samples(64, 128)
-        self.down2 = down_samples(128, 256)
-        self.miu = nn.Linear(256 * 7 * 7, latent_num)
-        self.var = nn.Linear(256 * 7 * 7, latent_num)
+        self.down1 = down_samples(in_channel, 64, 5)
+        self.down2 = down_samples(64, 128, 5)
+        self.down3 = down_samples(128, 256, 3)
+        self.miu = nn.Linear(256 * 3 * 3, latent_num)
+        self.var = nn.Linear(256 * 3 * 3, latent_num)
         # make sure that the var is always positive
         self.var_act = nn.Softplus()
 
     def forward(self, x):
-        x = self.conv1(x)
         x = self.down1(x)
         x = self.down2(x)
+        x = self.down3(x)
         res = torch.flatten(x, start_dim=1)
         miu = self.miu(res)
         var = self.var_act(self.var(res))
@@ -103,18 +105,19 @@ class Decoder(nn.Module):
     def __init__(self, num_latent=latent_num, output_channel=3):
         super(Decoder, self).__init__()
         self.num_latent = num_latent
-        self.dense = nn.Linear(num_latent, 256 * 7 * 7)
+        self.dense = nn.Linear(num_latent, 256 * 3 * 3)
         self.up1 = up_sample(256, 128)
         self.up2 = up_sample(128, 64)
-        self.pi = conv(64, output_channel)
+        self.pi = up_sample(64, output_channel)
         self.pi_act = nn.Softmax(dim=1)
 
     def forward(self, z):
         z = self.dense(z)
-        z = z.reshape((-1, 256, 7, 7))
+        z = z.reshape((-1, 256, 3, 3))
         z = self.up1(z)
         z = self.up2(z)
         pi = self.pi_act(self.pi(z))
+        pi = pi[:,:,1:29,1:29]
 
         return pi
 
@@ -175,7 +178,7 @@ def validate(x, encoder, decoder):
     return neg_elbo
 
 
-def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.0001, save=False):
+def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.001, save=False):
     if encoder_dir is None or decoder_dir is None:
         print("training new model")
         pass
