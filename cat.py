@@ -55,7 +55,7 @@ data_loader_test = torch.utils.data.DataLoader(dataset=data_test, shuffle=True)
 
 def conv(in_planes, out_planes):
     return nn.Sequential(
-        nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=1, padding=1),
+        nn.Conv2d(in_planes, out_planes, kernel_size=5, stride=1, padding=2),
         nn.BatchNorm2d(out_planes),
         nn.ReLU()
     )
@@ -64,7 +64,8 @@ def conv(in_planes, out_planes):
 def down_samples(in_planes, out_planes):
     return nn.Sequential(
         nn.MaxPool2d(2),
-        conv(in_planes, out_planes)
+        conv(in_planes, out_planes),
+        nn.ReLU()
     )
 
 
@@ -80,6 +81,7 @@ class Encoder(nn.Module):
     def __init__(self, in_channel=3, latent_num=latent_num):
         super(Encoder, self).__init__()
         self.conv1 = conv(in_channel, 64)
+        self.conv2 = conv(in_channel, 64)
         self.down1 = down_samples(64, 128)
         self.down2 = down_samples(128, 256)
         self.miu = nn.Linear(256 * 7 * 7, latent_num)
@@ -89,6 +91,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
+        x = self.conv2(x)
         x = self.down1(x)
         x = self.down2(x)
         res = torch.flatten(x, start_dim=1)
@@ -106,6 +109,7 @@ class Decoder(nn.Module):
         self.dense = nn.Linear(num_latent, 256 * 7 * 7)
         self.up1 = up_sample(256, 128)
         self.up2 = up_sample(128, 64)
+        self.conv1 = conv(64, 64)
         self.pi = conv(64, output_channel)
         self.pi_act = nn.Softmax(dim=1)
 
@@ -114,6 +118,7 @@ class Decoder(nn.Module):
         z = z.reshape((-1, 256, 7, 7))
         z = self.up1(z)
         z = self.up2(z)
+        z = self.conv1(z)
         pi = self.pi_act(self.pi(z))
 
         return pi
@@ -175,7 +180,7 @@ def validate(x, encoder, decoder):
     return neg_elbo
 
 
-def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.001, save=False):
+def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.0001, save=False):
     if encoder_dir is None or decoder_dir is None:
         print("training new model")
         pass
