@@ -2,6 +2,7 @@ import torch
 import os.path
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.data
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
@@ -16,10 +17,11 @@ else:
     device = torch.device('cpu')
 
 # var_x = 0.05
-batch_size = 128
+batch_size = 64
 num_train = 50000
 num_val = 10000
-latent_num = 100
+latent_num = 1000
+
 
 class onehot(object):
     def __call__(self, img):
@@ -34,6 +36,8 @@ class onehot(object):
         image = nn.functional.one_hot(image)
         image = np.squeeze(image)
         return image.permute(2, 0, 1)
+
+
 # get the data set
 transform = transforms.Compose([transforms.ToTensor(), onehot()])
 data_train = datasets.MNIST(root="./data/", transform=transform, train=True, download=True)
@@ -45,25 +49,29 @@ data_loader_val = torch.utils.data.DataLoader(dataset=data_val, batch_size=batch
 data_loader_test = torch.utils.data.DataLoader(dataset=data_test, shuffle=True)
 
 
-
-
 # build the model
 # the encoder part
 
-def conv(in_planes, out_planes, kernel_size=3, stride=1):
+
+def conv(in_planes, out_planes):
     return nn.Sequential(
-        nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size - 1) // 2,
-                  bias=False),
-        nn.LeakyReLU(0.1, inplace=True),
-        nn.BatchNorm2d(out_planes)
+        nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=1, padding=1),
+        nn.BatchNorm2d(out_planes),
+        nn.ReLU()
     )
 
 
-def deconv(in_planes, out_planes, kernel_size=2, stride=2):
+def down_samples(in_planes, out_planes):
     return nn.Sequential(
-        nn.ConvTranspose2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride),
-        nn.ReLU(),
-        nn.BatchNorm2d(out_planes)
+        nn.MaxPool2d(2),
+        conv(in_planes, out_planes)
+    )
+
+
+def up_sample(in_planes, out_planes):
+    return nn.Sequential(
+        nn.ConvTranspose2d(in_planes, out_planes, kernel_size=2, stride=2),
+        conv(out_planes, out_planes)
     )
 
 
@@ -71,22 +79,18 @@ class Encoder(nn.Module):
 
     def __init__(self, in_channel=3, latent_num=latent_num):
         super(Encoder, self).__init__()
-        self.conv1 = conv(in_channel, 8, kernel_size=3)
-        self.pool1 = nn.MaxPool2d(2, 2)
-        self.conv2 = conv(8, 16, kernel_size=3)
-        self.pool2 = nn.MaxPool2d(2, 2)
-        self.conv3 = conv(16, 32, kernel_size=3)
-        self.miu = nn.Linear(32 * 7 * 7, latent_num)
-        self.var = nn.Linear(32 * 7 * 7, latent_num)
+        self.conv1 = conv(in_channel, 64)
+        self.down1 = down_samples(64, 128)
+        self.down2 = down_samples(128, 256)
+        self.miu = nn.Linear(256 * 7 * 7, latent_num)
+        self.var = nn.Linear(256 * 7 * 7, latent_num)
         # make sure that the var is always positive
         self.var_act = nn.Softplus()
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.pool1(x)
-        x = self.conv2(x)
-        x = self.pool2(x)
-        x = self.conv3(x)
+        x = self.down1(x)
+        x = self.down2(x)
         res = torch.flatten(x, start_dim=1)
         miu = self.miu(res)
         var = self.var_act(self.var(res))
@@ -99,28 +103,22 @@ class Decoder(nn.Module):
     def __init__(self, num_latent=latent_num, output_channel=3):
         super(Decoder, self).__init__()
         self.num_latent = num_latent
-        self.dense = nn.Linear(num_latent, 32 * 7 * 7)
-        self.conv1 = conv(32, 16, kernel_size=3)
-        self.deconv1 = deconv(16, 16, 2, stride=2)
-        self.conv2 = nn.Conv2d(16, 8, kernel_size=3, padding=1)
-        self.sig = nn.Sigmoid()
-        self.deconv2 = deconv(8, 8, 2, stride=2)
-        self.pi = nn.Conv2d(8, output_channel, kernel_size=3, padding=1)
-        self.pi_act1 = nn.ReLU()
-        self.pi_act2 = nn.Sigmoid()
+        self.dense = nn.Linear(num_latent, 256 * 7 * 7)
+        self.up1 = up_sample(256, 128)
+        self.up2 = up_sample(128, 64)
+        self.pi = conv(64, output_channel)
+        self.pi_act = nn.Softmax(dim=1)
+
     def forward(self, z):
         z = self.dense(z)
-        z = z.reshape((-1, 32, 7, 7))
-        z = self.conv1(z)
-        z = self.deconv1(z)
-        z = self.sig(self.conv2(z))
-        z = self.deconv2(z)
-        pi = self.pi_act2(self.pi_act1(self.pi(z)))
+        z = z.reshape((-1, 256, 7, 7))
+        z = self.up1(z)
+        z = self.up2(z)
+        pi = self.pi_act(self.pi(z))
 
         return pi
 
     def sample(self, N, convert_to_numpy=False, suppress_noise=True):
-
         with torch.no_grad():
             z = torch.randn(N, self.num_latent, device=device)
             pi = self.forward(z)
@@ -138,13 +136,12 @@ def train(x, encoder, decoder, optimizer):
     x = x.to(device=device, dtype=dtype)
     encoder.to(device=device)
     decoder.to(device=device)
-    miu_z, var_z = encoder(x)
+    miu_z, var_z= encoder(x)
     batch_z = miu_z + torch.sqrt(var_z) * torch.randn(var_z.shape, device=device)
 
     pi = decoder(batch_z)
 
-
-    log_p = torch.sum(torch.log(pi**x+0.0001))
+    log_p = torch.sum(torch.log(pi ** x + 0.0001))
 
     KL = -0.5 * torch.sum(1 + torch.log(var_z) - miu_z ** 2 - var_z)
 
@@ -169,7 +166,7 @@ def validate(x, encoder, decoder):
         pi = decoder(batch_z)
         #
 
-        log_p = torch.sum(torch.log(pi**x+0.0001))
+        log_p = torch.sum(torch.log(pi ** x + 0.0001))
 
         KL = -0.5 * torch.sum(1 + torch.log(var_z) - miu_z ** 2 - var_z)
 
@@ -247,9 +244,9 @@ def fit(encoder, decoder, encoder_dir=None, decoder_dir=None, epochs=100, lr=0.0
 
     # save the model
     if save:
-        torch.save(encoder.state_dict(), './encoder_cat.pt')
-        torch.save(decoder.state_dict(), './decoder_cat.pt')
-        np.save('train_elbo.npy', train_elbo)
+        torch.save(encoder.state_dict(), 'beta model/encoder_beta.pt')
+        torch.save(decoder.state_dict(), 'beta model/decoder_beta.pt')
+
 
 def perform_test():
     # load the trained model
