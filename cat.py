@@ -123,7 +123,7 @@ class Decoder(nn.Module):
             z = torch.randn(N, self.num_latent, device=device)
             pi = self.forward(z)
             x = torch.argmax(pi, dim=1)
-
+            x = x * 0.5
         if convert_to_numpy:
             z = z.cpu().numpy()
             x = x.cpu().numpy()
@@ -270,11 +270,9 @@ def perform_test():
             x = x.to(device)
             miu_z, var_z = encoder(x)
             z = miu_z + torch.sqrt(var_z) * torch.randn(var_z.shape, device=device)
-            re_x, var_x = decoder(z)
-            var_x = var_x.mean()
-            re_x += torch.sqrt(var_x) * torch.randn(1, device=device)
+            pi = decoder(z)
+            re_x = torch.argmax(pi, dim=1)*0.5
             re_x = re_x.cpu().numpy()
-            re_x = re_x / re_x.max() - re_x.min()
             image[row * 28:row * 28 + 28, colum * 56 + 28:colum * 56 + 56] = re_x
         plt.imshow(image, cmap='gray')
         plt.title('sample_reconstruction')
